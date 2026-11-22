@@ -29,3 +29,13 @@ class EntryPayload(BaseModel):
 class ActionPayload(BaseModel):
     action: str
     remark: str | None = None
+
+
+class ReceiptDeliveryPayload(BaseModel):
+    """分表合并回执投递请求：模拟合并引擎（重）发完成回执。"""
+    task_no: str
+    table_name: str
+    partition: str = ""
+    replacement_addresses: list[str] = Field(default_factory=list)
+    result_file_count: str = ""
+    receipt_id: str | None = None

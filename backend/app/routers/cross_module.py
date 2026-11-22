@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.schemas import ReceiptDeliveryPayload
 from app.services import service_for, SERVICES
 from app.store import store
 from app.services.partition_policy import PartitionPolicyService
@@ -38,6 +39,66 @@ def list_cross_events(
     return {
         "total": len(events),
         "items": events[-limit:],
+    }
+
+
+@router.post("/compaction-receipts/deliver")
+def deliver_compaction_receipt(payload: ReceiptDeliveryPayload) -> dict[str, Any]:
+    """投递分表合并完成回执（合并引擎回调/消息重放入口）。
+
+    同一 (任务编号, 湖表) 重复投递只记一次；已登记回执再次送达不改变湖表来源。
+    """
+    receipt, created, message = FileCompactionService.deliver_completion_receipt(
+        payload.task_no,
+        payload.table_name,
+        partition=payload.partition,
+        replacement_addresses=payload.replacement_addresses,
+        result_file_count=payload.result_file_count,
+        receipt_id=payload.receipt_id,
+    )
+    return {"ok": True, "created": created, "message": message, "receipt": receipt}
+
+
+@router.get("/compaction-receipts")
+def list_compaction_receipts(
+    task_no: str | None = Query(default=None),
+    table_name: str | None = Query(default=None),
+    receipt_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """查询分表合并回执归属对照。
+
+    同一任务编号被两张湖表复用时，可按任务编号列出两张表各自的回执，
+    也可按湖表或回执编号单独查询，两个来源互不影响。
+    """
+    if receipt_id:
+        receipt = FileCompactionService.receipt_by_id(receipt_id)
+        receipts = [receipt] if receipt else []
+    elif task_no and table_name:
+        receipt = FileCompactionService.receipt_for(task_no, table_name)
+        receipts = [receipt] if receipt else []
+    elif task_no:
+        receipts = FileCompactionService.receipts_for_task(task_no)
+    elif table_name:
+        receipts = FileCompactionService.receipts_for_table(table_name)
+    else:
+        receipts = FileCompactionService.all_receipts()
+    return {
+        "total": len(receipts),
+        "items": receipts,
+    }
+
+
+@router.get("/retention-cleanups")
+def list_retention_cleanups(
+    table_name: str | None = Query(default=None),
+    retention_id: int | None = Query(default=None),
+) -> dict[str, Any]:
+    """查询保留策略清理记录：逐项标注替代文件来源湖表与替代地址。"""
+    records = RetentionMgrService.cleanup_records(
+        entry_id=retention_id, table_name=table_name)
+    return {
+        "total": len(records),
+        "items": records,
     }
 
 
